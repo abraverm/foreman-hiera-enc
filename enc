@@ -3,23 +3,19 @@
 require 'hiera'
 require 'yaml'
 
-# Query scope
-scope = { 'fqdn' => ARGV[0] }
+# Get Foreman configurations and define scope
+fqdn = ARGV[0]
+foreman = YAML.load(`/etc/puppet/external_node_v2.rb #{fqdn}`) || {}
+environment = foreman['environment'] || ''
 
+scope = { 'environment' => environment }
 # Hiera interface
-hiera = Hiera.new(:config => '/etc/puppet/hiera-enc/hiera-enc.yaml')
+hiera = Hiera.new(:config => '/etc/hiera.yaml')
 
-parameters = hiera.lookup('parameters', nil, scope)
-environment = hiera.lookup('environment', nil, scope)
+# Merge Hiera configuration on top of Foreman without overwrite
+classes = foreman['classes'].merge(hiera.lookup('classes', nil, scope) || {})
+parameters = foreman['parameters'].merge(hiera.lookup('parameters', nil, scope) || {})
+foreman['classes'] = classes
+foreman['parameters'] = parameters
 
-result = {}
-
-if parameters
-	result['parameters'] = parameters
-end
-
-if environment
-	result['environment'] = environment
-end
-
-puts result.to_yaml
+puts foreman.to_yaml

@@ -1,72 +1,86 @@
-Hiera-based Puppet ENC
-======================
+Hiera-based Foreman ENC
+=======================
 
-This project acts as a miniature Puppet ENC in YAML files, made
-accessible by Hiera. This makes server-side node configuration
-(e.g. environments, custom node parameters) easy to edit in the same
-way (and same place) as normal Hiera-based Puppet data.
+This project use the `enc` script to combine Foreman and Hiera configurations.
+Using Puppet Master ENC feature to provide YAML configurations to client.
+The script merges Hiera configurations over Foreman without overwriting them.
 
-Since an exec-based ENC simply prints out YAML when passed a node name,
-the script just gets the merged hierarchical data with Hiera and then
-prints.
+The idea is for Foreman to define the scope for Hiear and allow optional or
+temporary overwrite of "default" Hiera configurations.
+
+The script uses Foreman [`external_node_v2.rb`][1] to get client configuration.
+Then it uses the `environment` key to define the lookup scope in Hiera. With
+the `hiera.lookup` function it "fills" the missing configuration or in other
+words Foreman overwrites Hiera. The script will lookup for `parameters` and
+`classes` in Hiera with the same syntax and structure as in Foreman.
 
 Usage
------
-
-Deploy this repository on the puppetmaster as `/etc/puppet/hiera-enc`,
-and add the following lines to `puppet.conf`:
+--------
+To use the ENC feature in Puppet master add the following lines to
+`puppet.conf`:
 
     [master]
         node_terminus = exec
-        external_nodes = /etc/puppet/hiera-enc/enc
+        external_nodes = /etc/puppet/enc
 
-Node configuration may be made in
-`/etc/puppet/hiera-enc/nodes/<fqdn>.yaml`, or defaults set in the
-`default.yaml` file.
+Make sure to download [external_node_v2.rb][1] and configure
+`/etc/puppet/foreman.yaml`:
 
-Check the data returned for a given node by executing `./enc <fqdn>`,
-just as Puppet itself will do. Note that the `DEBUG` lines are printed 
-to STDERR and are not parsed by Puppet.
+	:url: "http://foreman:3000"
+	:puppetdir: "/var/lib/puppet"
+	:facts: true
+	:storeconfigs: true
+	:timeout: 3
+
+Environment configuration may be made in
+`/etc/puppet/hiera/hiera_<environment>/global.yaml`
+
+Check the data returned for a given node by executing `./enc <fqdn>`, just as
+Puppet itself will do. Note that the `DEBUG` lines are printed to STDERR and
+are not parsed by Puppet. Other option it to run `puppet agent -t` on the client
+and check the full result on Puppet Master at
+`/var/lib/puppet/yaml/node/<fqdn>.yaml`
+
+Customization
+-------------------
+Edit `enc` and `hiera.yaml` to define Hiera hierarchy and yaml location.
 
 Example
--------
+-----------
 
-Assume the yaml files `hostname.example.com.yaml` and `default.yaml`:
+`/etc/puppet/hiera/hiera_production/global.yaml`:
 
     ---
-    parameters:
-      role: workstation
+    class:
+      ntp:
+        servers: - clock.example.com iburst
 <!-- -->
-    ---
-    environment: production
+`/etc/puppet/external_node_v2.rb hostname.example.com`:
 
-When the enc is queried for `hostname.example.com`, the result is the
-merged hash of these values:
+	---
+	environment: production
+	classes:
+	  ntp:
+	    service_enable: true
+	parameters:
+	...
+
+When the enc is queried for `hostname.example.com`, the result is the merged
+hash of these values:
 
     $ ./enc hostname.example.com
-    DEBUG: 2014-07-11 13:04:24 +0200: Hiera YAML backend starting
-    DEBUG: 2014-07-11 13:04:24 +0200: Looking up parameters in YAML backend
-    DEBUG: 2014-07-11 13:04:24 +0200: Looking for data source hostname.example.com
-    DEBUG: 2014-07-11 13:04:24 +0200: Found parameters in hostname.example.com
-    DEBUG: 2014-07-11 13:04:24 +0200: Looking up environment in YAML backend
-    DEBUG: 2014-07-11 13:04:24 +0200: Looking for data source hostname.example.com
-    DEBUG: 2014-07-11 13:04:24 +0200: Looking for data source default
-    DEBUG: 2014-07-11 13:04:24 +0200: Found environment in default
+    DEBUG: Sun Oct 05 11:34:10 -0400 2014: Hiera YAML backend starting
+    DEBUG: Sun Oct 05 11:34:10 -0400 2014: Looking up classes in YAML backend
+    DEBUG: Sun Oct 05 11:34:10 -0400 2014: Looking for data source global
+    DEBUG: Sun Oct 05 11:34:10 -0400 2014: Found classes in global
+    DEBUG: Sun Oct 05 11:34:10 -0400 2014: Looking up parameters in YAML backend
+    DEBUG: Sun Oct 05 11:34:10 -0400 2014: Looking for data source global
     ---
-    parameters:
-      role: workstation
-    environment: production
+    classes:
+      ntp:
+        service_enable: true
+        servers:
+	- clock.example.com iburst
 
-If many nodes are sharing the same role (or environment) it may be
-convenient to symlink node names to shared definition files. For
-example, create a `workstation.def` and symlink workstation node fqdns
-to this file, rather than copying the content repeatedly. A long
-directory listing will therefore show:
-
-    # ls -la nodes/
-    total 12
-    drwxr-xr-x 2 root root 4096 Jul 11 13:20 .
-    drwxr-xr-x 6 root root 4096 Jul 11 13:20 ..
-    lrwxrwxrwx 1 root root   15 Jul 11 13:20 hostname.example.com.yaml -> workstation.def
-    -rw-r--r-- 1 root root   36 Jul 11 13:20 workstation.def
+[1]: https://github.com/theforeman/puppet-foreman/blob/master/files/external_node_v2.rb
 
